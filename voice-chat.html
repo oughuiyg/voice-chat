@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>แชตจับคู่อัตโนมัติ & โปรไฟล์คลื่นเสียง</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      margin: 0; padding: 12px;
+      background: #0f172a; color: #f8fafc;
+      display: flex; flex-direction: column; height: 100dvh;
+    }
+    .header {
+      background: #1e293b; padding: 12px; border-radius: 12px;
+      display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    .status-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 14px; font-weight: 600;
+    }
+    #status { color: #94a3b8; }
+
+    /* ส่วนแสดงโปรไฟล์คู่สนทนา */
+    .profile-section {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 0 4px;
+      gap: 8px;
+    }
+    .profile-section.visible {
+      display: flex;
+    }
+    .avatar-wrapper {
+      position: relative;
+      width: 84px;
+      height: 84px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #334155;
+      border: 3px solid #475569;
+      transition: transform 0.06s ease-out, box-shadow 0.06s ease-out, border-color 0.1s;
+    }
+    .avatar-wrapper.speaking {
+      border-color: #ef4444;
+    }
+    .avatar-img {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #1e293b;
+    }
+    .wave-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid rgba(239, 68, 68, 0);
+      pointer-events: none;
+      transition: transform 0.06s ease-out, border-color 0.08s, opacity 0.08s;
+    }
+    .profile-name {
+      font-size: 15px;
+      font-weight: bold;
+      color: #f1f5f9;
+    }
+    .speaking-label {
+      font-size: 12px;
+      color: #f87171;
+      height: 16px;
+      font-weight: 600;
+    }
+
+    .controls { display: flex; gap: 8px; }
+    button {
+      border: none; border-radius: 10px; padding: 12px 16px;
+      font-size: 15px; font-weight: bold; cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s; color: #fff;
+    }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #match-btn { flex: 2; background: #10b981; }
+    #match-btn.searching { background: #f59e0b; }
+    #match-btn.connected { background: #ef4444; }
+    #mic-btn { flex: 1; background: #3b82f6; }
+    #mic-btn.active { background: #dc2626; }
+
+    #chat-box {
+      flex: 1; background: #1e293b; border-radius: 12px; padding: 12px;
+      overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+      margin-bottom: 10px;
+    }
+    .msg {
+      padding: 10px 14px; border-radius: 14px; max-width: 78%;
+      word-wrap: break-word; font-size: 15px; line-height: 1.4;
+    }
+    .me { background: #059669; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .other { background: #334155; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .sys {
+      align-self: center; font-size: 12px; color: #94a3b8;
+      background: rgba(15, 23, 42, 0.6); padding: 4px 10px; border-radius: 20px;
+    }
+    .input-row { display: flex; gap: 8px; }
+    input {
+      flex: 1; padding: 12px 14px; border-radius: 10px;
+      border: 1px solid #334155; background: #1e293b; color: #fff;
+      font-size: 16px; outline: none;
+    }
+    input:focus { border-color: #10b981; }
+    #send-btn { background: #10b981; padding: 0 20px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="status-bar">
+      <span id="status">สถานะ: พร้อมจับคู่</span>
+      <span id="room-tag" style="font-size:12px; color:#64748b;"></span>
+    </div>
+
+    <!-- โปรไฟล์สุ่มที่จะแสดงเมื่อเชื่อมต่อสำเร็จ -->
+    <div class="profile-section" id="profile-section">
+      <div class="avatar-wrapper" id="avatar-wrapper">
+        <div class="wave-ring" id="wave-ring-1"></div>
+        <div class="wave-ring" id="wave-ring-2"></div>
+        <img id="avatar-img" class="avatar-img" src="" alt="โปรไฟล์">
+      </div>
+      <div class="profile-name" id="profile-name">คู่สนทนา</div>
+      <div class="speaking-label" id="speaking-label"></div>
+    </div>
+
+    <div class="controls">
+      <button id="match-btn" onclick="toggleMatch()">🔍 จับคู่อัตโนมัติ</button>
+      <button id="mic-btn" onclick="toggleMic()" disabled>🎤 เปิดไมค์</button>
+    </div>
+  </div>
+
+  <div id="chat-box">
+    <div class="sys">กดปุ่ม "จับคู่อัตโนมัติ" เพื่อเริ่มค้นหาคู่สนทนา</div>
+  </div>
+
+  <div class="input-row">
+    <input type="text" id="msg-input" placeholder="พิมพ์ข้อความ..." disabled>
+    <button id="send-btn" onclick="sendMessage()" disabled>ส่ง</button>
+  </div>
+
+  <audio id="remote-audio" autoplay playsinline></audio>
+
+  <script>
+    const SLOTS = ['auto-match-slot-1', 'auto-match-slot-2', 'auto-match-slot-3'];
+    let peer = null;
+    let conn = null;
+    let currentCall = null;
+    let localStream = null;
+    let remoteStreamRef = null;
+    let isSearching = false;
+    let isConnected = false;
+    let myPeerId = null;
+
+    // ตัวแปรสำหรับระบบวิเคราะห์คลื่นเสียง
+    let audioCtx = null;
+    let localAnalyser = null;
+    let remoteAnalyser = null;
+    let animFrameId = null;
+
+    const statusEl = document.getElementById('status');
+    const roomTagEl = document.getElementById('room-tag');
+    const matchBtn = document.getElementById('match-btn');
+    const micBtn = document.getElementById('mic-btn');
+    const chatBox = document.getElementById('chat-box');
+    const msgInput = document.getElementById('msg-input');
+    const sendBtn = document.getElementById('send-btn');
+    const remoteAudio = document.getElementById('remote-audio');
+
+    const profileSection = document.getElementById('profile-section');
+    const avatarWrapper = document.getElementById('avatar-wrapper');
+    const avatarImg = document.getElementById('avatar-img');
+    const profileName = document.getElementById('profile-name');
+    const speakingLabel = document.getElementById('speaking-label');
+    const waveRing1 = document.getElementById('wave-ring-1');
+    const waveRing2 = document.getElementById('wave-ring-2');
+
+    // รายการโปรไฟล์ SVG สำเร็จรูปในตัว (ใช้งานได้แม้ไม่มีเน็ตโหลดรูป)
+    const PROFILES = [
+      {
+        name: 'นักท่องอวกาศ #01',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1d4ed8"/><circle cx="50" cy="42" r="22" fill="#fde047"/><rect x="34" y="34" width="32" height="14" rx="7" fill="#0f172a"/><circle cx="43" cy="41" r="2.5" fill="#38bdf8"/><circle cx="57" cy="41" r="2.5" fill="#38bdf8"/><path d="M25 90 C25 68, 75 68, 75 90" fill="#e2e8f0"/></svg>`
+      },
+      {
+        name: 'แมวไซเบอร์ #02',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#7e22ce"/><polygon points="24,42 32,16 48,34" fill="#f472b6"/><polygon points="76,42 68,16 52,34" fill="#f472b6"/><circle cx="50" cy="54" r="26" fill="#f9a8d4"/><circle cx="40" cy="50" r="4" fill="#1e1b4b"/><circle cx="60" cy="50" r="4" fill="#1e1b4b"/><polygon points="47,58 53,58 50,62" fill="#be185d"/><path d="M42 66 Q50 72 58 66" stroke="#1e1b4b" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`
+      },
+      {
+        name: 'หุ่นยนต์เรโทร #03',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#047857"/><line x1="50" y1="14" x2="50" y2="28" stroke="#a7f3d0" stroke-width="4"/><circle cx="50" cy="12" r="5" fill="#f87171"/><rect x="26" y="28" width="48" height="44" rx="10" fill="#cbd5e1"/><circle cx="40" cy="46" r="5" fill="#0f172a"/><circle cx="60" cy="46" r="5" fill="#0f172a"/><rect x="36" y="58" width="28" height="6" rx="3" fill="#475569"/></svg>`
+      },
+      {
+        name: 'จิ้งจอกเพลิง #04',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#b45309"/><polygon points="22,45 28,15 48,36" fill="#fb923c"/><polygon points="78,45 72,15 52,36" fill="#fb923c"/><circle cx="50" cy="55" r="25" fill="#f97316"/><path d="M25 55 Q50 82 75 55 Q50 75 25 55" fill="#fff7ed"/><circle cx="41" cy="50" r="3.5" fill="#1c1917"/><circle cx="59" cy="50" r="3.5" fill="#1c1917"/><circle cx="50" cy="62" r="4" fill="#1c1917"/></svg>`
+      },
+      {
+        name: 'นินจาเงา #05',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1e293b"/><circle cx="50" cy="52" r="26" fill="#0f172a"/><rect x="30" y="42" width="40" height="14" rx="7" fill="#fed7aa"/><circle cx="41" cy="49" r="3.5" fill="#0f172a"/><circle cx="59" cy="49" r="3.5" fill="#0f172a"/><rect x="24" y="34" width="52" height="7" fill="#ef4444"/></svg>`
+      },
+      {
+        name: 'เอเลี่ยนนีออน #06',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#312e81"/><ellipse cx="50" cy="52" rx="24" ry="30" fill="#4ade80"/><ellipse cx="40" cy="48" rx="6" ry="9" transform="rotate(-20 40 48)" fill="#0f172a"/><ellipse cx="60" cy="48" rx="6" ry="9" transform="rotate(20 60 48)" fill="#0f172a"/><path d="M44 68 Q50 73 56 68" stroke="#0f172a" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`
+      }
+    ];
+
+    function setRandomProfile() {
+      const picked = PROFILES[Math.floor(Math.random() * PROFILES.length)];
+      avatarImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(picked.svg);
+      profileName.innerText = picked.name;
+      profileSection.classList.add('visible');
+    }
+
+    function addSysMsg(text) {
+      const div = document.createElement('div');
+      div.className = 'sys';
+      div.innerText = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function addChatMsg(text, sender) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + sender;
+      div.innerText = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function stopAudioVisualizer() {
+      if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      localAnalyser = null;
+      remoteAnalyser = null;
+      remoteStreamRef = null;
+      resetWaveVisual();
+    }
+
+    function resetWaveVisual() {
+      avatarWrapper.classList.remove('speaking');
+      avatarWrapper.style.transform = 'scale(1)';
+      avatarWrapper.style.boxShadow = 'none';
+      waveRing1.style.transform = 'scale(1)';
+      waveRing1.style.borderColor = 'rgba(239, 68, 68, 0)';
+      waveRing2.style.transform = 'scale(1)';
+      waveRing2.style.borderColor = 'rgba(239, 68, 68, 0)';
+      speakingLabel.innerText = '';
+    }
+
+    function ensureAudioContext() {
+      if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function attachLocalStreamAnalyser(stream) {
+      try {
+        ensureAudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        localAnalyser = analyser;
+        startVisualizerLoop();
+      } catch (e) {}
+    }
+
+    function attachRemoteStreamAnalyser(stream) {
+      try {
+        ensureAudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        remoteAnalyser = analyser;
+        startVisualizerLoop();
+      } catch (e) {}
+    }
+
+    function getVolumeLevel(analyser) {
+      if (!analyser) return 0;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        sum += data[i];
+      }
+      return sum / data.length;
+    }
+
+    function startVisualizerLoop() {
+      if (animFrameId) return;
+
+      function loop() {
+        const localVol = getVolumeLevel(localAnalyser);
+        const remoteVol = getVolumeLevel(remoteAnalyser);
+        const maxVol = Math.max(localVol, remoteVol);
+
+        if (maxVol > 10) {
+          const intensity = Math.min((maxVol - 10) / 55, 1.5);
+          const jitterX = (Math.random() - 0.5) * 4 * intensity;
+          const jitterY = (Math.random() - 0.5) * 4 * intensity;
+          const scale = 1 + intensity * 0.08;
+
+          avatarWrapper.classList.add('speaking');
+          avatarWrapper.style.transform = `translate(${jitterX.toFixed(1)}px, ${jitterY.toFixed(1)}px) scale(${scale.toFixed(3)})`;
+          avatarWrapper.style.boxShadow = `0 0 ${Math.round(12 + intensity * 22)}px rgba(239, 68, 68, ${Math.min(0.45 + intensity * 0.4, 0.95)})`;
+
+          const ring1Scale = 1.08 + intensity * 0.25;
+          const ring2Scale = 1.15 + intensity * 0.45;
+          waveRing1.style.transform = `scale(${ring1Scale.toFixed(2)})`;
+          waveRing1.style.borderColor = `rgba(239, 68, 68, ${Math.min(0.35 + intensity * 0.5, 0.9)})`;
+
+          waveRing2.style.transform = `scale(${ring2Scale.toFixed(2)})`;
+          waveRing2.style.borderColor = `rgba(248, 113, 113, ${Math.min(0.2 + intensity * 0.4, 0.7)})`;
+
+          speakingLabel.innerText = '● กำลังพูด...';
+        } else {
+          resetWaveVisual();
+        }
+
+        animFrameId = requestAnimationFrame(loop);
+      }
+      loop();
+    }
+
+    function resetState(msg) {
+      isSearching = false;
+      isConnected = false;
+      myPeerId = null;
+      stopAudioVisualizer();
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      if (currentCall) { currentCall.close(); currentCall = null; }
+      if (conn) { conn.close(); conn = null; }
+      if (peer) { peer.destroy(); peer = null; }
+
+      profileSection.classList.remove('visible');
+      statusEl.innerText = msg || 'สถานะ: พร้อมจับคู่';
+      statusEl.style.color = '#94a3b8';
+      roomTagEl.innerText = '';
+      matchBtn.innerText = '🔍 จับคู่อัตโนมัติ';
+      matchBtn.className = '';
+      micBtn.innerText = '🎤 เปิดไมค์';
+      micBtn.className = '';
+      micBtn.disabled = true;
+      msgInput.disabled = true;
+      sendBtn.disabled = true;
+    }
+
+    function toggleMatch() {
+      if (isConnected || isSearching) {
+        resetState('สถานะ: ยกเลิกแล้ว');
+        addSysMsg('ตัดการเชื่อมต่อแล้ว');
+        return;
+      }
+      startAutoMatch(0);
+    }
+
+    function startAutoMatch(slotIndex) {
+      if (slotIndex >= SLOTS.length) {
+        resetState('สถานะ: ห้องเต็ม ลองกดใหม่อีกครั้ง');
+        return;
+      }
+
+      isSearching = true;
+      const slotId = SLOTS[slotIndex];
+      statusEl.innerText = 'สถานะ: กำลังค้นหาคู่สนทนา...';
+      statusEl.style.color = '#fbbf24';
+      matchBtn.innerText = '⏳ กำลังหาคู่ (กดเพื่อยกเลิก)';
+      matchBtn.className = 'searching';
+
+      const tempPeer = new Peer(slotId);
+
+      tempPeer.on('open', (id) => {
+        myPeerId = id;
+        peer = tempPeer;
+        roomTagEl.innerText = 'ห้อง #' + (slotIndex + 1);
+        setupIncomingHandlers(peer);
+      });
+
+      tempPeer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+          tempPeer.destroy();
+          const uniqueGuestId = 'guest-' + slotIndex + '-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+          const guestPeer = new Peer(uniqueGuestId);
+          guestPeer.on('open', (id) => {
+            myPeerId = id;
+            peer = guestPeer;
+            roomTagEl.innerText = 'ห้อง #' + (slotIndex + 1);
+            setupIncomingHandlers(peer);
+            const connection = peer.connect(slotId, { reliable: true });
+
+            const timeout = setTimeout(() => {
+              if (!isConnected && isSearching) {
+                peer.destroy();
+                startAutoMatch(slotIndex + 1);
+              }
+            }, 4000);
+
+            connection.on('open', () => {
+              clearTimeout(timeout);
+              onConnected(connection);
+            });
+          });
+        } else {
+          resetState('สถานะ: เชื่อมต่อเครือข่ายไม่ได้');
+        }
+      });
+    }
+
+    function handleRemoteStream(stream) {
+      if (remoteStreamRef === stream) return;
+      remoteStreamRef = stream;
+      remoteAudio.srcObject = stream;
+      remoteAudio.play().catch(() => {});
+      attachRemoteStreamAnalyser(stream);
+    }
+
+    function setupIncomingHandlers(p) {
+      p.on('connection', (connection) => {
+        if (!connection || connection.peer === myPeerId) {
+          if (connection) connection.close();
+          return;
+        }
+        if (isConnected && conn && conn.peer !== connection.peer) {
+          connection.close();
+          return;
+        }
+        if (!isConnected) {
+          connection.on('open', () => {
+            if (!isConnected) onConnected(connection);
+          });
+          if (connection.open) {
+            onConnected(connection);
+          }
+        }
+      });
+
+      p.on('call', (call) => {
+        if (!call || call.peer === myPeerId) return;
+        call.answer(localStream || undefined);
+        currentCall = call;
+        call.on('stream', (remoteStream) => {
+          handleRemoteStream(remoteStream);
+        });
+      });
+    }
+
+    function onConnected(connection) {
+      if (isConnected && conn === connection) return;
+      conn = connection;
+      isSearching = false;
+      isConnected = true;
+
+      setRandomProfile();
+
+      statusEl.innerText = 'สถานะ: เชื่อมต่อสำเร็จ!';
+      statusEl.style.color = '#4ade80';
+      matchBtn.innerText = '❌ ตัดการเชื่อมต่อ';
+      matchBtn.className = 'connected';
+      micBtn.disabled = false;
+      msgInput.disabled = false;
+      sendBtn.disabled = false;
+
+      chatBox.innerHTML = '';
+      addSysMsg('จับคู่สำเร็จ! สุ่มโปรไฟล์ให้แล้ว พิมพ์ข้อความหรือกดเปิดไมค์ได้เลย');
+
+      conn.on('data', (payload) => {
+        if (typeof payload === 'object' && payload !== null) {
+          if (payload.from === myPeerId) return;
+          if (typeof payload.text === 'string') {
+            addChatMsg(payload.text, 'other');
+          }
+        } else if (typeof payload === 'string') {
+          addChatMsg(payload, 'other');
+        }
+      });
+
+      conn.on('close', () => {
+        addSysMsg('อีกฝ่ายออกจากห้องแล้ว');
+        resetState('สถานะ: อีกฝ่ายตัดการเชื่อมต่อ');
+      });
+    }
+
+    function sendMessage() {
+      const text = msgInput.value.trim();
+      if (!text || !conn || !isConnected) return;
+      conn.send({ from: myPeerId, text: text });
+      addChatMsg(text, 'me');
+      msgInput.value = '';
+    }
+
+    async function toggleMic() {
+      if (!isConnected || !conn) return;
+
+      if (!localStream) {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          attachLocalStreamAnalyser(localStream);
+
+          currentCall = peer.call(conn.peer, localStream);
+          currentCall.on('stream', (remoteStream) => {
+            handleRemoteStream(remoteStream);
+          });
+
+          micBtn.innerText = '🔴 ปิดไมค์';
+          micBtn.className = 'active';
+          addSysMsg('คุณเปิดไมค์แล้ว');
+        } catch (err) {
+          alert('เปิดไมค์ไม่สำเร็จ (ต้องเปิดผ่านลิงก์ https:// และกดอนุญาตไมโครโฟน): ' + err.message);
+        }
+      } else {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+        localAnalyser = null;
+        if (currentCall) { currentCall.close(); currentCall = nu
